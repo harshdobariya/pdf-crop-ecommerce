@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>PDF Crop & Print</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0f0f0f;--surf:#1a1a1a;--border:#2e2e2e;--acc:#e8ff47;--text:#e0e0e0;--muted:#555;--danger:#ff4747}
+body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;max-height:100vh;display:flex;flex-direction:column;overflow:hidden}
+header{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0}
+header h1{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.1em;color:var(--acc);text-transform:uppercase}
+.badge{font-family:'IBM Plex Mono',monospace;font-size:9px;background:var(--acc);color:#000;padding:2px 6px;border-radius:2px}
+
+.steps{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
+.step{flex:1;padding:8px 10px;font-size:9px;font-family:'IBM Plex Mono',monospace;color:var(--muted);border-right:1px solid var(--border);text-transform:uppercase;letter-spacing:.07em;cursor:pointer;user-select:none;transition:color .2s}
+.step:hover{color:var(--text)}
+.step.active{color:var(--acc)}
+.step.disabled{pointer-events:none;opacity:.3}
+.step span{display:block;font-size:8px;margin-bottom:1px;opacity:.4}
+
+.panel{display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden}
+.panel.visible{display:flex}
+
+/* ── Upload ── */
+#p-upload{flex-direction:column}
+.upload-topbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+.upload-topbar .bar-info{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);flex:1}
+.upload-grid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:10px;padding:12px 12px 14px;flex:1;min-height:0}
+.upload-slot{border:1.5px dashed var(--border);border-radius:6px;position:relative;cursor:pointer;transition:border-color .2s,background .2s;overflow:hidden;min-height:0}
+.upload-slot-inner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:8px;overflow:hidden}
+.upload-slot:hover,.upload-slot.drag{border-color:var(--acc);background:rgba(232,255,71,.03)}
+.upload-slot.loaded{border-color:#444;border-style:solid;background:var(--surf)}
+.slot-num{font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:600;color:var(--border);line-height:1;flex-shrink:0}
+.slot-num.filled{color:var(--acc)}
+.slot-name{font-family:'IBM Plex Mono',monospace;font-size:8px;color:var(--muted);text-align:center;width:100%;word-break:break-all;overflow-wrap:break-word;line-height:1.3;max-height:2.8em;overflow:hidden}
+.slot-discard{position:absolute;top:5px;right:5px;font-family:'IBM Plex Mono',monospace;font-size:9px;background:none;border:1px solid var(--danger);color:var(--danger);padding:1px 5px;border-radius:2px;cursor:pointer;transition:opacity .15s;z-index:2;white-space:nowrap}
+.upload-slot.loaded .slot-discard{opacity:1}
+.slot-label{font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--muted)}
+
+/* ── Top bar shared ── */
+.top-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg);z-index:10}
+.bar-info{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.top-bar button,.upload-topbar button{flex-shrink:0}
+
+/* ── Crop ── */
+#p-crop{flex-direction:column}
+#crop-scroll{flex:1;overflow:auto;background:#111;-webkit-overflow-scrolling:touch;scroll-behavior:auto}
+.pdf-section{padding:12px 12px 0;display:flex;flex-direction:column;align-items:center}
+.pdf-section:last-child{padding-bottom:12px}
+.pdf-badge{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--acc);background:#1a1a1a;border:1px solid var(--border);padding:2px 8px;border-radius:2px;margin-bottom:6px;align-self:flex-start}
+.pdf-canvas-wrap{position:relative;display:inline-block;line-height:0;box-shadow:0 0 24px rgba(0,0,0,.8)}
+.divider{width:100%;height:1px;background:var(--border);margin:12px 0}
+
+/* ── Place ── */
+#p-margin{flex-direction:column}
+#a4-wrap{flex:1;min-height:0;overflow:auto;background:#222;display:flex;align-items:flex-start;justify-content:center;touch-action:none;padding:8px}
+#a4-canvas{display:block;box-shadow:0 0 40px rgba(0,0,0,.9)}
+
+/* Buttons */
+button{font-family:'IBM Plex Mono',monospace;font-size:11px;padding:7px 13px;border:1px solid var(--border);background:var(--surf);color:var(--text);cursor:pointer;border-radius:3px;text-transform:uppercase;letter-spacing:.05em;transition:all .15s;white-space:nowrap}
+button:hover{border-color:var(--acc);color:var(--acc)}
+button.primary{background:var(--acc);color:#000;border-color:var(--acc);font-weight:600}
+button.primary:hover{background:#fff;border-color:#fff}
+button.danger{border-color:var(--danger);color:var(--danger)}
+button.danger:hover{background:var(--danger);color:#fff}
+button:disabled{opacity:.35;cursor:not-allowed}
+
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--acc);color:#000;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:8px 16px;border-radius:3px;opacity:0;pointer-events:none;transition:opacity .3s;z-index:999}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>PDF Crop &amp; Print</h1>
+  <span class="badge">Multi · PDF-native</span>
+</header>
+
+<div class="steps">
+  <div class="step active" id="s1" data-panel="p-upload"><span>01</span>Upload</div>
+  <div class="step disabled" id="s2" data-panel="p-crop"><span>02</span>Crop</div>
+  <div class="step disabled" id="s3" data-panel="p-margin"><span>03</span>Place</div>
+  <div class="step disabled" id="s4"><span>04</span>Preview</div>
+</div>
+
+<!-- Panel 1: Upload -->
+<div class="panel visible" id="p-upload">
+  <div class="upload-topbar">
+    <span class="bar-info" id="upload-status">Upload up to 4 PDFs</span>
+    <button class="primary" id="goto-crop" disabled>Crop All →</button>
+  </div>
+  <div class="upload-grid" id="upload-grid">
+    <!-- slots injected by JS -->
+  </div>
+</div>
+
+<!-- Panel 2: Crop -->
+<div class="panel" id="p-crop">
+  <div class="top-bar">
+    <span class="bar-info" id="crop-info">Scroll to see all PDFs</span>
+    <button class="danger" id="reset-all-crops">Reset All</button>
+    <button class="primary" id="to-margin">Place →</button>
+  </div>
+  <div id="crop-scroll"></div>
+</div>
+
+<!-- Panel 3: Place -->
+<div class="panel" id="p-margin">
+  <div class="top-bar">
+    <span class="bar-info">Drag · Pinch to scale each</span>
+    <button id="rotate-btn">↻ Rotate 90°</button>
+    <button id="to-crop-btn">← Back</button>
+    <button class="primary" id="to-preview">Preview →</button>
+  </div>
+  <div id="a4-wrap">
+    <canvas id="a4-canvas"></canvas>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ═══════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════
+const MM2PT   = 72/25.4;
+const A4W_MM  = 210, A4H_MM = 297;
+const MAX_PDF = 4;
+
+// Default crop: 202mm wide, 158mm tall, 4mm from left & top
+const DEF_CROP_W_MM = 202, DEF_CROP_H_MM = 158;
+const DEF_CROP_L_MM = 4,   DEF_CROP_T_MM = 4;
+
+// Default placement: 90° rotation, 60% fit-scale, 10mm margin
+const DEF_ROT = 90;
+
+// ═══════════════════════════════
+//  STATE — array of slots
+// ═══════════════════════════════
+// slots[i] = {
+//   pdfBytes, pdfJsDoc, pdfJsPage,
+//   pageWidthPt, pageHeightPt, displayScale,
+//   pdfCanvas, selCanvas,          // DOM canvases in crop section
+//   cropPx,                        // {x,y,w,h} in raw canvas px
+//   croppedImage,                  // ImageBitmap extracted for place
+//   place: {x,y,scale},            // position on A4 canvas
+//   rotationDeg,
+//   placedOnce,
+// }
+const slots = Array.from({length:MAX_PDF}, ()=>null);
+
+let maxStep = 1;
+let pxPerMm = 1;  // A4 canvas scale
+
+// ═══════════════════════════════
+//  HELPERS
+// ═══════════════════════════════
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2600);}
+function showPanel(id){document.querySelectorAll('.panel').forEach(p=>p.classList.remove('visible'));document.getElementById(id).classList.add('visible');}
+function setStep(n){
+  maxStep=Math.max(maxStep,n);
+  for(let i=1;i<=4;i++){
+    const s=document.getElementById('s'+i);
+    s.classList.toggle('active',i===n);
+    s.classList.toggle('disabled',i>maxStep);
+  }
+}
+function loadedSlots(){return slots.filter(s=>s!==null);}
+
+document.querySelectorAll('.step[data-panel]').forEach(s=>{
+  s.addEventListener('click',()=>{
+    if(s.classList.contains('disabled'))return;
+    showPanel(s.dataset.panel);
+    const n=parseInt(s.id.replace('s',''));
+    document.querySelectorAll('.step').forEach((el,i)=>el.classList.toggle('active',i+1===n));
+  });
+});
+
+// ═══════════════════════════════
+//  UPLOAD SLOTS
+// ═══════════════════════════════
+const grid = document.getElementById('upload-grid');
+
+function buildUploadGrid(){
+  grid.innerHTML='';
+  for(let i=0;i<MAX_PDF;i++){
+    const slot=document.createElement('div');
+    slot.className='upload-slot'+(slots[i]?' loaded':'');
+    slot.dataset.idx=i;
+
+    const inner=document.createElement('div');
+    inner.className='upload-slot-inner';
+
+    const num=document.createElement('div');
+    num.className='slot-num'+(slots[i]?' filled':'');
+    num.textContent=i+1;
+    inner.appendChild(num);
+
+    if(slots[i]){
+      const name=document.createElement('div');
+      name.className='slot-name';
+      name.textContent=slots[i].fileName||'PDF '+(i+1);
+      inner.appendChild(name);
+
+      const disc=document.createElement('button');
+      disc.className='slot-discard';
+      disc.textContent='✕';
+      disc.addEventListener('click',e=>{e.stopPropagation();discardSlot(i);});
+      slot.appendChild(disc); // outside inner so it sits in corner
+    } else {
+      const lbl=document.createElement('div');
+      lbl.className='slot-label';
+      lbl.textContent='Tap to upload';
+      inner.appendChild(lbl);
+    }
+
+    slot.appendChild(inner);
+
+    slot.addEventListener('dragover',e=>{e.preventDefault();slot.classList.add('drag');});
+    slot.addEventListener('dragleave',()=>slot.classList.remove('drag'));
+    slot.addEventListener('drop',e=>{e.preventDefault();slot.classList.remove('drag');loadFile(i,e.dataTransfer.files[0]);});
+    slot.addEventListener('click',()=>{if(!slots[i])triggerPick(i);});
+
+    grid.appendChild(slot);
+  }
+  updateUploadStatus();
+}
+
+function triggerPick(idx){
+  const inp=document.createElement('input');
+  inp.type='file';inp.accept='application/pdf';
+  inp.addEventListener('change',e=>loadFile(idx,e.target.files[0]));
+  inp.click();
+}
+
+function discardSlot(idx){
+  slots[idx]=null;
+  // if crop canvases exist, remove from DOM
+  const sec=document.getElementById('pdf-section-'+idx);
+  if(sec)sec.remove();
+  buildUploadGrid();
+}
+
+function updateUploadStatus(){
+  const n=loadedSlots().length;
+  document.getElementById('upload-status').textContent=
+    n===0?'Upload up to 4 PDFs':`${n} PDF${n>1?'s':''} loaded`;
+  document.getElementById('goto-crop').disabled=(n===0);
+}
+
+async function loadFile(idx, file){
+  if(!file||file.type!=='application/pdf')return toast('PDF only');
+
+  const pdfBytes = await file.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({data:pdfBytes.slice()}).promise;
+  const page = await doc.getPage(1);
+  const vp0  = page.getViewport({scale:1});
+
+  const pageWidthPt=vp0.width, pageHeightPt=vp0.height;
+  const availW=window.innerWidth-16, availH=window.innerHeight-90;
+  const fitScale=Math.min(availW/pageWidthPt, availH/pageHeightPt);
+  const renderScale=Math.min(fitScale*2,4);
+
+  // Default crop in canvas px
+  const cropPx = defaultCropPx(pageWidthPt, pageHeightPt, renderScale);
+
+  slots[idx]={
+    pdfBytes, pdfJsPage:page,
+    pageWidthPt, pageHeightPt, displayScale:renderScale,
+    fileName:file.name,
+    cropPx,
+    croppedImage:null,
+    place:{x:0,y:0,scale:1},
+    rotationDeg:DEF_ROT,
+    placedOnce:false,
+    pdfCanvas:null, selCanvas:null,
+  };
+
+  buildUploadGrid();
+}
+
+function defaultCropPx(pageWidthPt, pageHeightPt, displayScale){
+  const lPx=(DEF_CROP_L_MM*MM2PT/pageWidthPt) * (pageWidthPt*displayScale);
+  const tPx=(DEF_CROP_T_MM*MM2PT/pageHeightPt)* (pageHeightPt*displayScale);
+  const wPx=Math.min(DEF_CROP_W_MM*MM2PT*displayScale, pageWidthPt*displayScale-lPx);
+  const hPx=Math.min(DEF_CROP_H_MM*MM2PT*displayScale, pageHeightPt*displayScale-tPx);
+  return{x:lPx, y:tPx, w:wPx, h:hPx};
+}
+
+buildUploadGrid();
+
+// ── Goto Crop ──
+document.getElementById('goto-crop').addEventListener('click', async()=>{
+  await buildCropSection();
+  showPanel('p-crop');setStep(2);
+});
+
+// ═══════════════════════════════
+//  CROP SECTION
+// ═══════════════════════════════
+const cropScrollEl = document.getElementById('crop-scroll');
+const cropInfoEl   = document.getElementById('crop-info');
+
+async function buildCropSection(){
+  cropScrollEl.innerHTML='';
+  const active=loadedSlots();
+
+  for(let i=0;i<MAX_PDF;i++){
+    const s=slots[i];
+    if(!s)continue;
+
+    // section wrapper
+    const sec=document.createElement('div');
+    sec.className='pdf-section';
+    sec.id='pdf-section-'+i;
+
+    // badge
+    const badge=document.createElement('div');
+    badge.className='pdf-badge';
+    badge.textContent=`PDF ${i+1} · ${s.fileName||''}`;
+    sec.appendChild(badge);
+
+    // canvas wrapper
+    const wrap=document.createElement('div');
+    wrap.className='pdf-canvas-wrap';
+
+    const pc=document.createElement('canvas');
+    const sc=document.createElement('canvas');
+    sc.style.cssText='position:absolute;top:0;left:0;pointer-events:none';
+    wrap.appendChild(pc);
+    wrap.appendChild(sc);
+    sec.appendChild(wrap);
+
+    // divider (not after last)
+    const divider=document.createElement('div');
+    divider.className='divider';
+    sec.appendChild(divider);
+
+    cropScrollEl.appendChild(sec);
+
+    // render
+    const vp=s.pdfJsPage.getViewport({scale:s.displayScale});
+    pc.width=sc.width=vp.width;
+    pc.height=sc.height=vp.height;
+    const fitW=Math.round(s.pageWidthPt*(s.displayScale/2));
+    const fitH=Math.round(s.pageHeightPt*(s.displayScale/2));
+    pc.style.width=sc.style.width=fitW+'px';
+    pc.style.height=sc.style.height=fitH+'px';
+    await s.pdfJsPage.render({canvasContext:pc.getContext('2d'),viewport:vp}).promise;
+
+    s.pdfCanvas=pc; s.selCanvas=sc;
+    drawCropOverlay(s);
+  }
+
+  attachCropInteraction();
+  updateCropInfo();
+}
+
+// ── Draw overlay for one slot ──
+const HANDLE_R=28;
+
+function getHandles(r){
+  const mx=r.x+r.w/2,my=r.y+r.h/2;
+  return{nw:{x:r.x,y:r.y},ne:{x:r.x+r.w,y:r.y},sw:{x:r.x,y:r.y+r.h},se:{x:r.x+r.w,y:r.y+r.h},
+         n:{x:mx,y:r.y},s:{x:mx,y:r.y+r.h},w:{x:r.x,y:my},e:{x:r.x+r.w,y:my}};
+}
+function hitHandle(p,r){
+  for(const[n,h] of Object.entries(getHandles(r)))
+    if(Math.abs(p.x-h.x)<=HANDLE_R&&Math.abs(p.y-h.y)<=HANDLE_R)return n;
+  return null;
+}
+function inside(p,r){return p.x>r.x&&p.x<r.x+r.w&&p.y>r.y&&p.y<r.y+r.h;}
+
+function drawCropOverlay(s){
+  const sc=s.selCanvas, pc=s.pdfCanvas;
+  if(!sc||!pc)return;
+  const ctx=sc.getContext('2d');
+  ctx.clearRect(0,0,sc.width,sc.height);
+  const r=s.cropPx; if(!r||r.w<2||r.h<2)return;
+  ctx.fillStyle='rgba(0,0,0,0.46)';
+  ctx.fillRect(0,0,sc.width,sc.height);
+  ctx.clearRect(r.x,r.y,r.w,r.h);
+  ctx.strokeStyle='#e8ff47';ctx.lineWidth=1.5;ctx.strokeRect(r.x,r.y,r.w,r.h);
+  // thirds
+  ctx.strokeStyle='rgba(232,255,71,0.18)';ctx.lineWidth=0.7;
+  for(let i=1;i<3;i++){
+    ctx.beginPath();ctx.moveTo(r.x+r.w*i/3,r.y);ctx.lineTo(r.x+r.w*i/3,r.y+r.h);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(r.x,r.y+r.h*i/3);ctx.lineTo(r.x+r.w,r.y+r.h*i/3);ctx.stroke();
+  }
+  // L-shaped corner handles
+  const L=22,T=5;
+  ctx.fillStyle='#e8ff47';ctx.strokeStyle='rgba(0,0,0,0.5)';ctx.lineWidth=1;
+  [{x:r.x,y:r.y,dx:1,dy:1},{x:r.x+r.w,y:r.y,dx:-1,dy:1},
+   {x:r.x,y:r.y+r.h,dx:1,dy:-1},{x:r.x+r.w,y:r.y+r.h,dx:-1,dy:-1}].forEach(({x,y,dx,dy})=>{
+    ctx.fillRect(x,y+(dy<0?-T:0),L*dx,T);ctx.strokeRect(x,y+(dy<0?-T:0),L*dx,T);
+    ctx.fillRect(x+(dx<0?-T:0),y,T,L*dy);ctx.strokeRect(x+(dx<0?-T:0),y,T,L*dy);
+  });
+  // Edge mid bars
+  const mx=r.x+r.w/2,my=r.y+r.h/2;
+  [{x:mx-L/2,y:r.y-T/2,w:L,h:T},{x:mx-L/2,y:r.y+r.h-T/2,w:L,h:T},
+   {x:r.x-T/2,y:my-L/2,w:T,h:L},{x:r.x+r.w-T/2,y:my-L/2,w:T,h:L}].forEach(({x,y,w,h})=>{
+    ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);
+  });
+}
+
+function updateCropInfo(){
+  const active=loadedSlots();
+  if(!active.length){cropInfoEl.textContent='No PDFs loaded';return;}
+  const s=active[0];
+  if(!s.cropPx){cropInfoEl.textContent='No crop — full page';return;}
+  const wMm=(s.cropPx.w/s.displayScale/MM2PT).toFixed(1);
+  const hMm=(s.cropPx.h/s.displayScale/MM2PT).toFixed(1);
+  cropInfoEl.textContent=`Crop: ${wMm}×${hMm}mm (applied to all)`;
+}
+
+// ── Reset all crops ──
+document.getElementById('reset-all-crops').addEventListener('click',()=>{
+  for(let i=0;i<MAX_PDF;i++){
+    const s=slots[i]; if(!s)continue;
+    s.cropPx=null; drawCropOverlay(s);
+  }
+  updateCropInfo();
+});
+
+// ── Crop interaction — single handler for all PDFs ──
+const NONE=0,DRAW=1,MOVE=2,RESIZE=3,PAN=4;
+let cmode=NONE,cStart=null,origCrop=null,resizeH='',activeSlotIdx=-1;
+let panStart=null,scrollStart=null;
+
+function slotFromCanvas(pc){
+  return slots.findIndex(s=>s&&s.pdfCanvas===pc);
+}
+
+function toCanvasCoords(pc,clientX,clientY){
+  const r=pc.getBoundingClientRect();
+  return{x:(clientX-r.left)*(pc.width/r.width),y:(clientY-r.top)*(pc.height/r.height)};
+}
+function clampPx(p,pc){return{x:Math.min(Math.max(p.x,0),pc.width),y:Math.min(Math.max(p.y,0),pc.height)};}
+function clampBox(r,pc){const W=pc.width,H=pc.height;return{x:Math.min(Math.max(r.x,0),W-r.w),y:Math.min(Math.max(r.y,0),H-r.h),w:r.w,h:r.h};}
+function applyResize(h,orig,start,cur,pc){
+  const dx=cur.x-start.x,dy=cur.y-start.y;
+  let{x,y,w,h:ht}=orig;const MIN=20;
+  if(h.includes('e'))w=Math.max(MIN,orig.w+dx);
+  if(h.includes('s'))ht=Math.max(MIN,orig.h+dy);
+  if(h.includes('w')){x=Math.min(orig.x+dx,orig.x+orig.w-MIN);w=orig.w-(x-orig.x);}
+  if(h.includes('n')){y=Math.min(orig.y+dy,orig.y+orig.h-MIN);ht=orig.h-(y-orig.y);}
+  x=Math.max(0,x);y=Math.max(0,y);
+  w=Math.min(w,pc.width-x);ht=Math.min(ht,pc.height-y);
+  return{x,y,w,h:ht};
+}
+function normRect(a,b){return{x:Math.min(a.x,b.x),y:Math.min(a.y,b.y),w:Math.abs(b.x-a.x),h:Math.abs(b.y-a.y)};}
+
+function onPdfCanvas(clientX,clientY){
+  // returns slot index if clientX/Y is over any pdf canvas
+  for(let i=0;i<MAX_PDF;i++){
+    const s=slots[i]; if(!s||!s.pdfCanvas)continue;
+    const r=s.pdfCanvas.getBoundingClientRect();
+    if(clientX>=r.left&&clientX<=r.right&&clientY>=r.top&&clientY<=r.bottom)return i;
+  }
+  return -1;
+}
+
+// Momentum state for crop scroll
+let momentumVx=0,momentumVy=0,momentumRAF=null;
+let lastPanPos=null,lastPanTime=0;
+
+function stopMomentum(){if(momentumRAF){cancelAnimationFrame(momentumRAF);momentumRAF=null;}}
+function startMomentum(el){
+  stopMomentum();
+  let vx=momentumVx,vy=momentumVy;
+  function step(){
+    if(Math.abs(vx)<0.3&&Math.abs(vy)<0.3){momentumRAF=null;return;}
+    el.scrollLeft+=vx;el.scrollTop+=vy;
+    vx*=0.92;vy*=0.92;
+    momentumRAF=requestAnimationFrame(step);
+  }
+  momentumRAF=requestAnimationFrame(step);
+}
+
+function attachCropInteraction(){
+  cropScrollEl.addEventListener('mousedown', handleCropDown);
+  window.addEventListener('mousemove', handleCropMove);
+  window.addEventListener('mouseup', handleCropUp);
+  cropScrollEl.addEventListener('touchstart', handleCropTouchStart,{passive:false});
+  cropScrollEl.addEventListener('touchmove', handleCropTouchMove,{passive:false});
+  cropScrollEl.addEventListener('touchend', handleCropTouchEnd);
+}
+
+function handleCropDown(e){
+  const si=onPdfCanvas(e.clientX,e.clientY);
+  if(si<0){
+    // pan scroll
+    cmode=PAN;panStart={x:e.clientX,y:e.clientY};scrollStart={x:cropScrollEl.scrollLeft,y:cropScrollEl.scrollTop};
+    cropScrollEl.style.cursor='grabbing';return;
+  }
+  activeSlotIdx=si;
+  const s=slots[si];
+  const p=toCanvasCoords(s.pdfCanvas,e.clientX,e.clientY);
+  if(s.cropPx){
+    const h=hitHandle(p,s.cropPx);
+    if(h){cmode=RESIZE;resizeH=h;cStart=p;origCrop={...s.cropPx};e.preventDefault();return;}
+    if(inside(p,s.cropPx)){cmode=MOVE;cStart=p;origCrop={...s.cropPx};e.preventDefault();return;}
+    // outside box → pan
+    cmode=PAN;panStart={x:e.clientX,y:e.clientY};scrollStart={x:cropScrollEl.scrollLeft,y:cropScrollEl.scrollTop};return;
+  }
+  cmode=DRAW;cStart=clampPx(p,s.pdfCanvas);drawCropOverlay(s);e.preventDefault();
+}
+
+function handleCropMove(e){
+  if(cmode===NONE)return;
+  if(cmode===PAN){cropScrollEl.scrollLeft=scrollStart.x-(e.clientX-panStart.x);cropScrollEl.scrollTop=scrollStart.y-(e.clientY-panStart.y);return;}
+  const s=slots[activeSlotIdx];if(!s)return;
+  const p=toCanvasCoords(s.pdfCanvas,e.clientX,e.clientY);
+  if(cmode===DRAW){const r=normRect(cStart,clampPx(p,s.pdfCanvas));s.cropPx=r.w>4&&r.h>4?r:null;}
+  else if(cmode===MOVE){s.cropPx=clampBox({x:origCrop.x+(p.x-cStart.x),y:origCrop.y+(p.y-cStart.y),w:origCrop.w,h:origCrop.h},s.pdfCanvas);}
+  else if(cmode===RESIZE){s.cropPx=applyResize(resizeH,origCrop,cStart,clampPx(p,s.pdfCanvas),s.pdfCanvas);}
+  drawCropOverlay(s);
+}
+
+function handleCropUp(){
+  if(cmode===DRAW){const s=slots[activeSlotIdx];if(s&&s.cropPx&&(s.cropPx.w<6||s.cropPx.h<6))s.cropPx=null;}
+  cmode=NONE;cropScrollEl.style.cursor='';
+  if(activeSlotIdx>=0&&slots[activeSlotIdx])drawCropOverlay(slots[activeSlotIdx]);
+  updateCropInfo();
+}
+
+function handleCropTouchStart(e){
+  stopMomentum();
+  if(e.touches.length!==1){cmode=NONE;return;}
+  const t=e.touches[0];
+  lastPanPos={x:t.clientX,y:t.clientY};lastPanTime=performance.now();
+  momentumVx=0;momentumVy=0;
+  const si=onPdfCanvas(t.clientX,t.clientY);
+  if(si<0){cmode=PAN;panStart={x:t.clientX,y:t.clientY};scrollStart={x:cropScrollEl.scrollLeft,y:cropScrollEl.scrollTop};return;}
+  activeSlotIdx=si;
+  const s=slots[si];
+  const p=toCanvasCoords(s.pdfCanvas,t.clientX,t.clientY);
+  if(s.cropPx){
+    const h=hitHandle(p,s.cropPx);
+    if(h){cmode=RESIZE;resizeH=h;cStart=p;origCrop={...s.cropPx};e.preventDefault();return;}
+    if(inside(p,s.cropPx)){cmode=MOVE;cStart=p;origCrop={...s.cropPx};e.preventDefault();return;}
+    cmode=PAN;panStart={x:t.clientX,y:t.clientY};scrollStart={x:cropScrollEl.scrollLeft,y:cropScrollEl.scrollTop};return;
+  }
+  cmode=DRAW;cStart=clampPx(p,s.pdfCanvas);drawCropOverlay(s);e.preventDefault();
+}
+
+function handleCropTouchMove(e){
+  if(cmode===NONE)return;
+  const t=e.touches[0];
+  if(cmode===PAN){
+    const now=performance.now(),dt=now-lastPanTime||16;
+    momentumVx=(lastPanPos.x-t.clientX)/dt*16;
+    momentumVy=(lastPanPos.y-t.clientY)/dt*16;
+    lastPanPos={x:t.clientX,y:t.clientY};lastPanTime=now;
+    cropScrollEl.scrollLeft=scrollStart.x-(t.clientX-panStart.x);
+    cropScrollEl.scrollTop=scrollStart.y-(t.clientY-panStart.y);
+    e.preventDefault();return;
+  }
+  const s=slots[activeSlotIdx];if(!s)return;
+  const p=toCanvasCoords(s.pdfCanvas,t.clientX,t.clientY);
+  if(cmode===DRAW){const r=normRect(cStart,clampPx(p,s.pdfCanvas));s.cropPx=r.w>4&&r.h>4?r:null;}
+  else if(cmode===MOVE){s.cropPx=clampBox({x:origCrop.x+(p.x-cStart.x),y:origCrop.y+(p.y-cStart.y),w:origCrop.w,h:origCrop.h},s.pdfCanvas);}
+  else if(cmode===RESIZE){s.cropPx=applyResize(resizeH,origCrop,cStart,clampPx(p,s.pdfCanvas),s.pdfCanvas);}
+  drawCropOverlay(s);e.preventDefault();
+}
+
+function handleCropTouchEnd(){
+  if(cmode===PAN){startMomentum(cropScrollEl);}
+  if(cmode===DRAW){const s=slots[activeSlotIdx];if(s&&s.cropPx&&(s.cropPx.w<6||s.cropPx.h<6))s.cropPx=null;}
+  cmode=NONE;
+  if(activeSlotIdx>=0&&slots[activeSlotIdx])drawCropOverlay(slots[activeSlotIdx]);
+  updateCropInfo();
+}
+
+function toPt(s, r){
+  return{x:r.x/s.displayScale, y:s.pageHeightPt-(r.y+r.h)/s.displayScale, w:r.w/s.displayScale, h:r.h/s.displayScale};
+}
+
+// ═══════════════════════════════
+//  PLACE PANEL
+// ═══════════════════════════════
+const a4Canvas=document.getElementById('a4-canvas');
+const a4Ctx=a4Canvas.getContext('2d');
+const a4Wrap=document.getElementById('a4-wrap');
+
+document.getElementById('to-margin').addEventListener('click',async()=>{
+  await buildPlacePanel();
+  showPanel('p-margin');setStep(3);
+});
+document.getElementById('to-crop-btn').addEventListener('click',()=>{
+  showPanel('p-crop');
+  document.querySelectorAll('.step').forEach((el,i)=>el.classList.toggle('active',i===1));
+});
+
+async function buildPlacePanel(){
+  const wrapW=a4Wrap.clientWidth||window.innerWidth;
+  const wrapH=a4Wrap.clientHeight||(window.innerHeight-80);
+  pxPerMm=Math.min((wrapW-32)/A4W_MM,(wrapH-32)/A4H_MM);
+  const cW=Math.round(A4W_MM*pxPerMm);
+  const cH=Math.round(A4H_MM*pxPerMm);
+  a4Canvas.width=cW;a4Canvas.height=cH;
+
+  for(let i=0;i<MAX_PDF;i++){
+    const s=slots[i];
+    if(!s)continue;
+
+    // extract crop
+    const pc=s.pdfCanvas;
+    const sx=s.cropPx?s.cropPx.x:0, sy=s.cropPx?s.cropPx.y:0;
+    const sw=s.cropPx?s.cropPx.w:pc.width, sh=s.cropPx?s.cropPx.h:pc.height;
+    const tmp=document.createElement('canvas');tmp.width=sw;tmp.height=sh;
+    tmp.getContext('2d').drawImage(pc,sx,sy,sw,sh,0,0,sw,sh);
+    s.croppedImage=await createImageBitmap(tmp);
+
+    if(!s.placedOnce){
+      s.rotationDeg=DEF_ROT;
+      // Each PDF goes in one of 4 fixed quadrants: 0=TL,1=TR,2=BL,3=BR
+      // A4 split into 2 cols × 2 rows with equal margins all around
+      const gapMm=6, edgeMm=8;
+      const gapPx=gapMm*pxPerMm, edgePx=edgeMm*pxPerMm;
+      const cellW=(cW-2*edgePx-gapPx)/2;
+      const cellH=(cH-2*edgePx-gapPx)/2;
+      const col=i%2, row=Math.floor(i/2);
+      const cellX=edgePx+col*(cellW+gapPx);
+      const cellY=edgePx+row*(cellH+gapPx);
+
+      // For 90° rotation effective dims swap
+      const effW=s.croppedImage.height; // rotated 90°: width↔height
+      const effH=s.croppedImage.width;
+      const fitS=Math.min(cellW/effW, cellH/effH);
+      s.place.scale=fitS*0.82; // ~same visual as previous 60% of fit
+      // center within cell
+      s.place.x=cellX+(cellW-effW*s.place.scale)/2;
+      s.place.y=cellY+(cellH-effH*s.place.scale)/2;
+      s.placedOnce=true;
+    }
+  }
+  // Set initial rotate target to first loaded slot
+  const firstLoaded=slots.findIndex(s=>s!==null);
+  if(firstLoaded>=0) activeA4SlotIdx=firstLoaded;
+
+  drawA4();
+}
+
+function getEffDims(s){
+  if(!s.croppedImage)return{w:0,h:0};
+  const rot90=s.rotationDeg===90||s.rotationDeg===270;
+  const w=rot90?s.croppedImage.height:s.croppedImage.width;
+  const h=rot90?s.croppedImage.width:s.croppedImage.height;
+  return{w:w*s.place.scale,h:h*s.place.scale};
+}
+
+function drawA4(){
+  const cW=a4Canvas.width,cH=a4Canvas.height;
+  a4Ctx.fillStyle='#fff';a4Ctx.fillRect(0,0,cW,cH);
+  // A5 midline
+  const a5y=Math.round(cH/2);
+  a4Ctx.save();a4Ctx.setLineDash([7,5]);
+  a4Ctx.strokeStyle='rgba(0,0,0,0.18)';a4Ctx.lineWidth=1.2;
+  a4Ctx.beginPath();a4Ctx.moveTo(0,a5y);a4Ctx.lineTo(cW,a5y);a4Ctx.stroke();
+  a4Ctx.restore();
+  a4Ctx.fillStyle='rgba(0,0,0,0.15)';a4Ctx.font='10px IBM Plex Mono,monospace';
+  a4Ctx.fillText('A5',4,a5y-4);
+
+  const active=loadedSlots();
+  active.forEach((s,ai)=>{
+    if(!s.croppedImage)return;
+    const{w:dw,h:dh}=getEffDims(s);
+    a4Ctx.save();
+    a4Ctx.translate(s.place.x+dw/2,s.place.y+dh/2);
+    a4Ctx.rotate(s.rotationDeg*Math.PI/180);
+    const rot90=s.rotationDeg===90||s.rotationDeg===270;
+    const drawW=rot90?s.croppedImage.width*s.place.scale:dw;
+    const drawH=rot90?s.croppedImage.height*s.place.scale:dh;
+    a4Ctx.drawImage(s.croppedImage,-drawW/2,-drawH/2,drawW,drawH);
+    a4Ctx.restore();
+    // border + index badge
+    const origIdx=slots.indexOf(s);
+    const isActive=(origIdx===activeA4SlotIdx);
+    a4Ctx.save();
+    a4Ctx.setLineDash(isActive?[]:[4,3]);
+    a4Ctx.strokeStyle=isActive?'rgba(232,255,71,0.9)':'rgba(80,120,255,0.4)';
+    a4Ctx.lineWidth=isActive?2:1;
+    a4Ctx.strokeRect(s.place.x,s.place.y,dw,dh);
+    a4Ctx.restore();
+    // badge number
+    const badgeIdx=origIdx+1;
+    a4Ctx.fillStyle='rgba(232,255,71,0.85)';
+    a4Ctx.fillRect(s.place.x+2,s.place.y+2,14,14);
+    a4Ctx.fillStyle='#000';
+    a4Ctx.font='bold 9px IBM Plex Mono,monospace';
+    a4Ctx.fillText(badgeIdx,s.place.x+5,s.place.y+12);
+  });
+
+  a4Ctx.strokeStyle='#bbb';a4Ctx.lineWidth=1;a4Ctx.strokeRect(0,0,cW,cH);
+}
+
+// ── Rotate — applies to currently dragged / last touched slot ──
+let activeA4SlotIdx=0; // index into slots[] of the currently selected PDF for rotation
+document.getElementById('rotate-btn').addEventListener('click',()=>{
+  const s=slots[activeA4SlotIdx];
+  if(!s)return;
+  s.rotationDeg=(s.rotationDeg+90)%360;
+  drawA4();
+});
+
+// ── Drag on A4 — drag whichever PDF you start on ──
+let a4drag=false,a4dragStart=null,a4placeOrig=null,a4dragSlot=null;
+let pinching=false,pinchDist0=0,pinchScale0=1,pinchSlot=null;
+
+function a4Pos(cx,cy){
+  const r=a4Canvas.getBoundingClientRect();
+  return{x:(cx-r.left)*(a4Canvas.width/r.width),y:(cy-r.top)*(a4Canvas.height/r.height)};
+}
+function slotAtPos(p){
+  // find topmost slot whose bounding box contains p (reverse order = top drawn last)
+  const active=loadedSlots();
+  for(let i=active.length-1;i>=0;i--){
+    const s=active[i];
+    const{w,h}=getEffDims(s);
+    if(p.x>=s.place.x&&p.x<=s.place.x+w&&p.y>=s.place.y&&p.y<=s.place.y+h)return s;
+  }
+  return null;
+}
+function touchDist(t){const dx=t[0].clientX-t[1].clientX,dy=t[0].clientY-t[1].clientY;return Math.sqrt(dx*dx+dy*dy);}
+
+a4Canvas.addEventListener('mousedown',e=>{
+  const p=a4Pos(e.clientX,e.clientY);
+  const tapped=slotAtPos(p);
+  if(tapped){
+    const idx=slots.indexOf(tapped);
+    if(idx>=0) activeA4SlotIdx=idx;
+  }
+  a4dragSlot=tapped||loadedSlots()[0];
+  if(!a4dragSlot)return;
+  a4drag=true;a4dragStart=p;a4placeOrig={...a4dragSlot.place};a4Canvas.style.cursor='grabbing';
+  drawA4();
+});
+window.addEventListener('mousemove',e=>{
+  if(!a4drag||!a4dragSlot)return;
+  const p=a4Pos(e.clientX,e.clientY);
+  a4dragSlot.place.x=a4placeOrig.x+(p.x-a4dragStart.x);
+  a4dragSlot.place.y=a4placeOrig.y+(p.y-a4dragStart.y);
+  drawA4();
+});
+window.addEventListener('mouseup',()=>{if(a4drag){a4drag=false;a4Canvas.style.cursor='default';}});
+
+a4Canvas.addEventListener('wheel',e=>{
+  e.preventDefault();
+  const p=a4Pos(e.clientX,e.clientY);
+  const s=slotAtPos(p)||loadedSlots()[0];if(!s)return;
+  const factor=e.deltaY<0?1.05:0.95;
+  const{w,h}=getEffDims(s);
+  const cx=s.place.x+w/2,cy=s.place.y+h/2;
+  s.place.scale=Math.min(Math.max(s.place.scale*factor,0.02),10);
+  const{w:nw,h:nh}=getEffDims(s);
+  s.place.x=cx-nw/2;s.place.y=cy-nh/2;
+  drawA4();
+},{passive:false});
+
+a4Canvas.addEventListener('touchstart',e=>{
+  if(e.touches.length===1){
+    const p=a4Pos(e.touches[0].clientX,e.touches[0].clientY);
+    const tapped=slotAtPos(p);
+    if(tapped){
+      const idx=slots.indexOf(tapped);
+      if(idx>=0){activeA4SlotIdx=idx;drawA4();}
+    }
+    a4dragSlot=tapped||loadedSlots()[0];
+    if(!a4dragSlot)return;
+    a4drag=true;a4dragStart=p;a4placeOrig={...a4dragSlot.place};
+  } else if(e.touches.length===2){
+    a4drag=false;pinching=true;
+    pinchDist0=touchDist(e.touches);
+    const p=a4Pos(e.touches[0].clientX,e.touches[0].clientY);
+    pinchSlot=slotAtPos(p)||loadedSlots()[0];
+    if(pinchSlot)pinchScale0=pinchSlot.place.scale;
+  }
+  e.preventDefault();
+},{passive:false});
+
+a4Canvas.addEventListener('touchmove',e=>{
+  if(pinching&&e.touches.length===2&&pinchSlot){
+    const d=touchDist(e.touches);
+    pinchSlot.place.scale=Math.min(Math.max(pinchScale0*(d/pinchDist0),0.02),10);
+    drawA4();
+  } else if(a4drag&&e.touches.length===1&&a4dragSlot){
+    const p=a4Pos(e.touches[0].clientX,e.touches[0].clientY);
+    a4dragSlot.place.x=a4placeOrig.x+(p.x-a4dragStart.x);
+    a4dragSlot.place.y=a4placeOrig.y+(p.y-a4dragStart.y);
+    drawA4();
+  }
+  e.preventDefault();
+},{passive:false});
+
+a4Canvas.addEventListener('touchend',()=>{a4drag=false;pinching=false;pinchSlot=null;});
+
+// ═══════════════════════════════
+//  GENERATE + PREVIEW
+// ═══════════════════════════════
+document.getElementById('to-preview').addEventListener('click',generateAndPreview);
+
+async function generateAndPreview(){
+  const btn=document.getElementById('to-preview');
+  btn.disabled=true;btn.textContent='Building…';
+  try{
+    const{PDFDocument}=PDFLib;
+    const mm2pt=mm=>mm*MM2PT;
+    const A4W=mm2pt(A4W_MM),A4H=mm2pt(A4H_MM);
+
+    const newDoc=await PDFDocument.create();
+    const outPage=newDoc.addPage([A4W,A4H]);
+    const ptPerPx=A4H/a4Canvas.height;
+    const active=loadedSlots();
+
+    for(const s of active){
+      if(!s.croppedImage)continue;
+      const srcDoc=await PDFDocument.load(s.pdfBytes.slice());
+      const[embPage]=await newDoc.embedPdf(srcDoc,[0]);
+
+      let cx,cy,cw,ch;
+      if(s.cropPx){const c=toPt(s,s.cropPx);cx=c.x;cy=c.y;cw=c.w;ch=c.h;}
+      else{cx=0;cy=0;cw=s.pageWidthPt;ch=s.pageHeightPt;}
+
+      const{w:dispW,h:dispH}=getEffDims(s);
+      const pdfX=s.place.x*ptPerPx;
+      const pdfY=A4H-(s.place.y*ptPerPx)-(dispH*ptPerPx);
+      const pdfW=dispW*ptPerPx;
+      const pdfH=dispH*ptPerPx;
+
+      outPage.pushOperators(
+        PDFLib.pushGraphicsState(),
+        PDFLib.moveTo(pdfX,pdfY),PDFLib.lineTo(pdfX+pdfW,pdfY),
+        PDFLib.lineTo(pdfX+pdfW,pdfY+pdfH),PDFLib.lineTo(pdfX,pdfY+pdfH),
+        PDFLib.closePath(),PDFLib.clip(),PDFLib.endPath(),
+      );
+
+      const rad=-s.rotationDeg*Math.PI/180;
+      const cosR=Math.cos(rad),sinR=Math.sin(rad);
+      let fScale;
+      if(s.rotationDeg===90||s.rotationDeg===270)fScale=Math.min(pdfW/ch,pdfH/cw);
+      else fScale=Math.min(pdfW/cw,pdfH/ch);
+
+      const bcx=pdfX+pdfW/2,bcy=pdfY+pdfH/2;
+      const cropCx=cx+cw/2,cropCy=cy+ch/2;
+      const a=cosR*fScale,b=sinR*fScale,c2=-sinR*fScale,d=cosR*fScale;
+      const tx=bcx-(a*cropCx+c2*cropCy),ty=bcy-(b*cropCx+d*cropCy);
+
+      outPage.pushOperators(
+        PDFLib.pushGraphicsState(),
+        PDFLib.concatTransformationMatrix(a,b,c2,d,tx,ty),
+      );
+      outPage.drawPage(embPage,{x:0,y:0,width:s.pageWidthPt,height:s.pageHeightPt});
+      outPage.pushOperators(PDFLib.popGraphicsState(),PDFLib.popGraphicsState());
+    }
+
+    const bytes=await newDoc.save();
+    window.open(URL.createObjectURL(new Blob([bytes],{type:'application/pdf'})),'_blank');
+    setStep(4);toast('Opened in browser — print from there');
+  }catch(err){console.error(err);toast('Error: '+err.message);}
+  btn.disabled=false;btn.textContent='Preview →';
+}
+</script>
+</body>
+</html>
